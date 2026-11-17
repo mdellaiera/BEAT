@@ -93,18 +93,62 @@ On the MIT `face` clip (10 s, 30 fps):
   advantage over POS. The clear gain over the 2012 work is in the
   magnification, not in the rate estimate.
 
+## Moving faces: face stabilization
+
+`tools/stabilize.py` unwraps the face of every frame onto a fixed flat map: the
+478-point MediaPipe face mesh is tracked, and each of its triangles is warped onto
+the mesh's canonical UV layout. In the output, the eyes, nose, mouth and every
+patch of skin stay at the same pixels however the head moves, so the fixed grid
+used by BEAT keeps tracking the same skin.
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
+.venv/bin/python tools/stabilize.py my-clip.mp4            # -> my-clip-stabilized.mp4
+.venv/bin/python tools/stabilize.py my-clip.mp4 --preview  # input + mesh beside the output
+node tools/measure.mjs my-clip.mp4 my-clip-stabilized.mp4  # compare the heart rates
+```
+
+The stabilized video can also be opened in the app. Details:
+
+- Landmarks are smoothed in time (`--smooth`, Gaussian sigma in frames) so that
+  tracking jitter does not turn into fake colour changes.
+- Triangles turned away from the camera (below `--min-visibility` of their best
+  size in the clip) are blacked out rather than smeared.
+- The output is near-lossless H.264 (`--size`, 256 px by default), since the
+  pulse lives in very faint colour changes.
+- `--landmarks out.npy` saves the smoothed landmarks.
+
+Test on the demo clip with synthetic head motion added (rotation up to ±17°,
+shift up to ±95 px, zoom ±15 %):
+
+| Clip | GREEN | CHROM | POS | BEAT |
+|---|---|---|---|---|
+| Still, as recorded | 52.8 / 9.4 | 52.9 / 7.3 | 52.7 / 9.3 | 52.6 / 9.6 |
+| Still, stabilized | 52.5 / 6.6 | 52.7 / 5.1 | 52.6 / 8.6 | 52.6 / 9.3 |
+| Moving, as recorded | 50.7 / 0.9 | 55.5 / 0.2 | 44.0 / −0.8 | 52.8 / 5.6 |
+| Moving, stabilized | 51.1 / 1.1 | 52.6 / 6.5 | 52.8 / 8.5 | 52.6 / 8.8 |
+
+(bpm / pulse SNR in dB). Without stabilization, motion breaks the published
+estimators; after it, POS and BEAT are nearly as good as on the still clip. At
+twice that motion the rates are still right after stabilization (52.1–52.6
+bpm) but the SNR drops to 1–4 dB: at large poses the landmarks are a few pixels
+off, so each map pixel slides slightly over the skin. This synthetic motion is
+2D only; real head turns also change lighting and hide parts of the face, and
+have not been tested yet.
+
 ## Limitations
 
 - The demo clip has no contact-sensor ground truth; the estimators are checked
   against each other, not against an ECG.
-- The face must stay roughly still: cells are fixed in the frame.
+- In the app, the face must stay roughly still: cells are fixed in the frame.
+  Stabilize moving clips first with `tools/stabilize.py`.
 - This is a demonstration, not a medical device.
 
 ## Roadmap
 
-- **Moving faces.** Everything downstream of the grid only needs a
-  `time × cells × RGB` tensor, so the plan is to replace the fixed grid with
-  cells attached to tracked face landmarks.
+- **Moving faces in the app.** Run the stabilization in the browser
+  (MediaPipe has a web version), and remove motion residue from the signal.
+- Test on real head motion, with lighting changes.
 - Live webcam input with a sliding window.
 - Validation on a public dataset with ground truth (e.g. UBFC-rPPG).
 
@@ -116,7 +160,8 @@ src/app.js              UI wiring
 src/extract.js          video → low-resolution clip
 src/charts.js           SVG charts
 src/core/               dsp, pyramid, rppg, magnify (shared with Node)
-tools/                  validate.mjs, benchmark.mjs
+tools/                  validate.mjs, benchmark.mjs, measure.mjs,
+                        stabilize.py (+ face_uv.json mesh layout)
 ```
 
 ## Reference
