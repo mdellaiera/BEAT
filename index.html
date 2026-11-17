@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BEAT · heart rate from video</title>
+  <meta name="description" content="Measure a heart rate from an ordinary video of a face, and see the pulse amplified. Runs entirely in your browser.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23e34948' d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+      <h1>BEAT</h1>
+    </div>
+    <p class="tagline">Heart rate from ordinary video</p>
+    <a class="repo" href="https://github.com/mdellaiera/BEAT">GitHub</a>
+  </header>
+
+  <main>
+    <section class="stage card">
+      <div class="viewer">
+        <canvas id="view" aria-label="Video with amplified pulse"></canvas>
+        <div id="status" class="status" role="status">
+          <p id="statusText">Loading clip…</p>
+          <div class="bar"><div id="statusBar"></div></div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="segmented" role="radiogroup" aria-label="View">
+          <button role="radio" data-mode="original" aria-checked="false">Original</button>
+          <button role="radio" data-mode="evm" aria-checked="false">MIT 2012</button>
+          <button role="radio" data-mode="beat" aria-checked="true">BEAT</button>
+          <button role="radio" data-mode="map" aria-checked="false">Pulse map</button>
+        </div>
+        <label class="slider">Amplification
+          <input id="gain" type="range" min="0" max="150" value="50" step="5">
+          <output id="gainOut">×50</output>
+        </label>
+        <button id="play" class="ghost" aria-label="Pause">Pause</button>
+      </div>
+      <p id="modeNote" class="note"></p>
+      <div class="source">
+        <button id="demo" class="ghost">MIT demo clip</button>
+        <label class="ghost file">Open a video…<input id="file" type="file" accept="video/*" hidden></label>
+        <span class="note">Videos are processed on your device and never uploaded.</span>
+      </div>
+    </section>
+
+    <section class="readout">
+      <div class="card hero">
+        <svg id="heart" class="heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        <div>
+          <div class="bpm"><span id="bpm">–</span><small>bpm</small></div>
+          <p id="quality" class="note">&nbsp;</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Pulse wave</h2>
+        <p class="note">Fused skin-colour signal. Dots mark detected beats.</p>
+        <div id="waveChart" class="chart"></div>
+      </div>
+
+      <div class="card">
+        <h2>Spectrum</h2>
+        <p class="note">Signal power by rate. The peak is the heart rate.</p>
+        <div id="specChart" class="chart"></div>
+      </div>
+
+      <div class="card">
+        <h2>Estimators compared</h2>
+        <table id="methods">
+          <thead><tr><th>Method</th><th>Rate (bpm)</th><th>Pulse SNR (dB)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <section class="about">
+    <article>
+      <h3>1 · Measure</h3>
+      <p>Each heartbeat changes how much blood is in the skin, and so its colour, by a fraction of a percent. BEAT splits the frame into small cells, turns each cell's colour into a pulse candidate, and weights the cells by how well they agree with each other.</p>
+    </article>
+    <article>
+      <h3>2 · Magnify</h3>
+      <p><em>MIT 2012</em> is Eulerian Video Magnification as published: amplify everything inside a hand-picked frequency band. <em>BEAT</em> amplifies only what follows the measured pulse, so no band has to be chosen and the background stays still.</p>
+    </article>
+    <article>
+      <h3>3 · Check</h3>
+      <p>Three published estimators (GREEN, CHROM, POS) run alongside on the same clip. This is a demonstration, not a medical device.</p>
+    </article>
+  </section>
+
+  <footer>
+    <p>Demo clip and reference result from Wu, Rubinstein, Shih, Guttag, Durand and Freeman, <a href="https://people.csail.mit.edu/mrub/evm/">Eulerian Video Magnification for Revealing Subtle Changes in the World</a>, SIGGRAPH 2012.</p>
+  </footer>
+
+  <div id="tip" class="tip" hidden></div>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
