@@ -22,6 +22,10 @@
     <section class="stage card">
       <div class="viewer">
         <canvas id="view" aria-label="Video with amplified pulse"></canvas>
+        <figure id="flatBox" class="flat" hidden>
+          <canvas id="flat" width="256" height="256" aria-label="The face projected onto a flat map"></canvas>
+          <figcaption>Face map</figcaption>
+        </figure>
         <div id="status" class="status" role="status">
           <p id="statusText">Loading clip…</p>
           <div class="bar"><div id="statusBar"></div></div>
@@ -82,7 +86,7 @@
   <section class="about">
     <article>
       <h3>1 · Measure</h3>
-      <p>Each heartbeat changes how much blood is in the skin, and so its colour, by a fraction of a percent. BEAT splits the frame into small cells, turns each cell's colour into a pulse candidate, and weights the cells by how well they agree with each other.</p>
+      <p>Each heartbeat changes how much blood is in the skin, and so its colour, by a fraction of a percent. BEAT tracks the face and unfolds it onto a flat <em>face map</em>, where every patch of skin stays in place however the head moves. It splits the map into small cells, turns each cell's colour into a pulse candidate, and weights the cells by how well they agree with each other.</p>
     </article>
     <article>
       <h3>2 · Magnify</h3>

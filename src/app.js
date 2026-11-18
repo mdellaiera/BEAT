@@ -1,6 +1,8 @@
 import { extractClip } from './extract.js';
 import { analyze } from './core/rppg.js';
 import { magnifyEVM, magnifyPulse, makeCompositor } from './core/magnify.js';
+import { makeFaceCompositor, makeUnwrapper } from './core/unwrap.js';
+import { loadMesh, loadTracker } from './face.js';
 import { lineChart } from './charts.js';
 
 const DEMO = 'data/face.mp4';
@@ -10,6 +12,10 @@ const DEMO_EVM = { fLow: 50 / 60, fHigh: 60 / 60 };
 const $ = (id) => document.getElementById(id);
 const view = $('view');
 const ctx = view.getContext('2d', { willReadFrequently: true });
+const flatView = $('flat');
+const flatCtx = flatView.getContext('2d');
+// Triangles shown less than this fraction of their frontal size are hidden.
+const MIN_VISIBILITY = 0.1;
 const video = document.createElement('video');
 video.muted = true;
 video.loop = true;
@@ -29,6 +35,15 @@ let charts = [];
 let jobId = 0;
 let objectUrl = null;
 let lastTime = 0;
+let face = null; // { tracker, mesh, display } once loaded, or false
+
+async function loadFace() {
+  face ??= (async () => {
+    const [tracker, mesh] = await Promise.all([loadTracker(), loadMesh().catch(() => null)]);
+    return tracker && mesh ? { tracker, mesh, display: makeUnwrapper(mesh, flatView.width) } : false;
+  })();
+  return face;
+}
 
 function setStatus(text, progress = null) {
   $('status').hidden = text == null;
@@ -61,24 +76,33 @@ async function load(src, isDemo) {
       video.src = src;
       video.load();
     });
+    setStatus('Loading the face tracker…');
+    const tracking = await loadFace();
+    if (job !== jobId) return;
     const clip = await extractClip(video, {
-      onProgress: (p) => { if (job === jobId) setStatus('Reading frames…', p); },
+      tracker: tracking?.tracker, mesh: tracking?.mesh,
+      onProgress: (p) => { if (job === jobId) setStatus(tracking ? 'Reading frames and tracking the face…' : 'Reading frames…', p); },
     });
     if (job !== jobId) return;
     setStatus('Measuring pulse…');
     await nextPaint();
 
     const { low, fs, width, height } = clip;
-    const analysis = analyze(low, fs);
+    // With a tracked face the pulse is measured on the flat face map, where
+    // every cell keeps looking at the same skin. MIT's method is kept on the
+    // fixed grid of the frame, as published.
+    const flat = clip.face;
+    const analysis = analyze(flat ? flat.low : low, fs);
     const found = Number.isFinite(analysis.bpm);
     const f0 = analysis.bpm / 60;
     const band = isDemo || !found ? DEMO_EVM : { fLow: f0 - 5 / 60, fHigh: f0 + 5 / 60 };
     // Deltas are computed at unit gain; the slider scales them at display time.
     const evm = magnifyEVM(low, fs, { ...band, alpha: 1 });
+    const grid = flat ? flat.low : low;
     const pulse = found
-      ? magnifyPulse(low, fs, analysis, { alpha: 1 })
-      : { delta: new Float32Array(low.data.length), gate: new Float32Array(low.w * low.h) };
-    const map = new Float32Array(low.w * low.h * 3);
+      ? magnifyPulse(grid, fs, analysis, { alpha: 1 })
+      : { delta: new Float32Array(grid.data.length), gate: new Float32Array(grid.w * grid.h) };
+    const map = new Float32Array(grid.w * grid.h * 3);
     for (let i = 0; i < pulse.gate.length; i++) {
       map[i * 3] = -0.3 * pulse.gate[i]; map[i * 3 + 1] = -0.05 * pulse.gate[i]; map[i * 3 + 2] = 0.35 * pulse.gate[i];
     }
@@ -86,10 +110,14 @@ async function load(src, isDemo) {
 
     view.width = width; view.height = height;
     state = {
-      low, fs, analysis, found, band, isDemo,
+      low, fs, analysis, found, band, isDemo, flat,
       deltas: { evm, beat: pulse.delta, map },
       compositor: makeCompositor(low.w, low.h, width, height),
+      faceCompositor: flat && makeFaceCompositor(tracking.mesh, flat.size, flat.low.w, flat.low.h, width, height),
+      flatImage: flat && new ImageData(flatView.width, flatView.height),
+      display: flat && tracking.display,
     };
+    $('flatBox').hidden = !flat;
     showResults();
     setMode(mode);
     setStatus(null);
@@ -108,7 +136,7 @@ function showResults() {
   const grade = !found ? 'No pulse found. Try a steadier, evenly lit clip of a face.'
     : snr >= 6 ? 'Strong signal' : snr >= 2 ? 'Fair signal' : 'Weak signal: treat this rate with caution';
   $('quality').textContent = found
-    ? `${grade} · SNR ${snr.toFixed(1)} dB · ${analysis.beats.length} beats in ${(low.T / fs).toFixed(1)} s`
+    ? `${grade} · SNR ${snr.toFixed(1)} dB · ${analysis.beats.length} beats in ${(low.T / fs).toFixed(1)} s · ${state.flat ? 'face tracked' : 'fixed grid'}`
     : grade;
 
   const body = $('methods').tBodies[0];
@@ -178,35 +206,44 @@ function setMode(next) {
   }
   $('gain').disabled = mode === 'original' || mode === 'map';
   if (!state) return;
-  const { band, isDemo, found } = state;
+  const { band, isDemo, found, flat } = state;
   const range = `${(band.fLow * 60).toFixed(0)}–${(band.fHigh * 60).toFixed(0)} bpm`;
   $('modeNote').textContent = {
     original: 'The clip as recorded. The pulse is there, but far too faint to see.',
     evm: isDemo
       ? `Eulerian Video Magnification with the published settings for this clip: every pixel's ${range} band is amplified, wherever it comes from.`
       : `Eulerian Video Magnification: every pixel's ${range} band is amplified. The band was centred on the measured rate; the original method needs it chosen by hand.`,
-    beat: found
-      ? 'Only the part of each pixel that follows the measured pulse is amplified. No band to choose, and regions without a pulse stay untouched.'
-      : 'No pulse was found, so there is nothing to amplify.',
-    map: 'Blue marks the skin where a pulse was found, and how strongly it is trusted.',
+    beat: !found ? 'No pulse was found, so there is nothing to amplify.'
+      : `Only the part of each pixel that follows the measured pulse is amplified. No band to choose, and regions without a pulse stay untouched.${flat ? ' The amplification follows the tracked face.' : ''}`,
+    map: `Blue marks the skin where a pulse was found, and how strongly it is trusted${flat ? ', on the tracked face' : ''}.`,
   }[mode];
   if (video.paused) paint(video.currentTime);
 }
 
 function paint(time) {
   if (!state) return;
-  const { low, fs, deltas, compositor, analysis } = state;
+  const { low, fs, deltas, compositor, faceCompositor, flat, analysis } = state;
   ctx.drawImage(video, 0, 0, view.width, view.height);
   const frame = Math.min(low.T - 1, Math.max(0, Math.floor(time * fs + 0.01)));
-  if (mode !== 'original') {
+  const pts = flat?.landmarks.subarray(frame * 936, (frame + 1) * 936);
+  if (mode !== 'original' || flat) {
     const img = ctx.getImageData(0, 0, view.width, view.height);
     const gain = Number($('gain').value);
+    // On a tracked face, the BEAT views live on the flat face map and are
+    // drawn back onto the face where it is in this frame.
+    const add = (delta, t, g) => (flat
+      ? faceCompositor.apply(img.data, delta, t, g, pts, MIN_VISIBILITY)
+      : compositor.apply(img.data, delta, t, g));
     // The reference EVM filter halves the amplitude; match it so that both
     // modes are compared at the same nominal amplification.
     if (mode === 'evm') compositor.apply(img.data, deltas.evm, frame, gain);
-    else if (mode === 'beat') compositor.apply(img.data, deltas.beat, frame, gain / 2);
-    else compositor.apply(img.data, deltas.map, 0, 1);
-    ctx.putImageData(img, 0, 0);
+    else if (mode === 'beat') add(deltas.beat, frame, gain / 2);
+    else if (mode === 'map') add(deltas.map, 0, 1);
+    if (mode !== 'original') ctx.putImageData(img, 0, 0);
+    if (flat) {
+      state.display.warp(img.data, view.width, view.height, pts, { out: state.flatImage.data, minVisibility: MIN_VISIBILITY });
+      flatCtx.putImageData(state.flatImage, 0, 0);
+    }
   }
   const shown = Math.min(time, (low.T - 1) / fs);
   charts[0]?.setPlayhead(shown);

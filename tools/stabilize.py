@@ -26,7 +26,7 @@ import numpy as np
 
 MODEL_URL = ('https://storage.googleapis.com/mediapipe-models/face_landmarker/'
              'face_landmarker/float16/latest/face_landmarker.task')
-MESH = Path(__file__).with_name('face_uv.json')
+MESH = Path(__file__).resolve().parent.parent / 'src' / 'core' / 'face-mesh.json'
 
 
 def model_path(path):

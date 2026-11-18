@@ -15,8 +15,8 @@ npm start          # python3 -m http.server 8000
 ```
 
 Then open <http://localhost:8000>. The MIT `face` clip loads automatically; use
-**Open a video…** for your own clip (at least 4 seconds, a steady and evenly lit
-face; the first 30 seconds are used).
+**Open a video…** for your own clip (at least 4 seconds of an evenly lit face;
+the first 30 seconds are used).
 
 To publish on GitHub Pages: commit `index.html`, `style.css`, `src/` and
 `data/face.mp4`, then in the repository settings choose *Pages → Deploy from a
@@ -93,13 +93,45 @@ On the MIT `face` clip (10 s, 30 fps):
   advantage over POS. The clear gain over the 2012 work is in the
   magnification, not in the rate estimate.
 
-## Moving faces: face stabilization
+## Moving faces: the face map
 
-`tools/stabilize.py` unwraps the face of every frame onto a fixed flat map: the
-478-point MediaPipe face mesh is tracked, and each of its triangles is warped onto
-the mesh's canonical UV layout. In the output, the eyes, nose, mouth and every
-patch of skin stay at the same pixels however the head moves, so the fixed grid
-used by BEAT keeps tracking the same skin.
+The app tracks the face with MediaPipe Face Landmarker (loaded in the browser
+from a CDN; frames still never leave the device) and unfolds every frame onto
+a fixed flat map, the UV layout of MediaPipe's canonical face mesh, triangle by
+triangle. On that map, the eyes, nose, mouth and every patch of skin stay at
+the same place however the head moves, so each measuring cell keeps looking at
+the same skin. The map is shown live in the corner of the video.
+
+- The heart rate is measured on the face map.
+- **BEAT** and **Pulse map** are computed on the face map and drawn back onto
+  the face wherever it is in each frame.
+- **MIT 2012** stays on the fixed grid of the frame, as published; on a moving
+  face it shows why that is not enough.
+- Triangles turned away from the camera are hidden.
+- Without the tracker (offline, or the face found in less than half of the
+  frames), the app falls back to the fixed grid and says so.
+
+Measured in the app (headless Chrome) on the demo clip with synthetic head
+motion added (×1: rotation up to ±17°, shift up to ±95 px, zoom ±15 %; ×2:
+twice that), bpm / pulse SNR in dB:
+
+| Clip | GREEN | CHROM | POS | BEAT |
+|---|---|---|---|---|
+| Still | 52.7 / 9.4 | 52.6 / 8.4 | 52.7 / 9.4 | 52.6 / 9.8 |
+| Moving ×1 | 53.0 / 8.3 | 52.7 / 7.1 | 52.8 / 8.3 | 52.7 / 8.6 |
+| Moving ×2 | 52.7 / 4.3 | 52.6 / 4.2 | 52.8 / 8.1 | 52.7 / 8.5 |
+| Moving ×1, fixed grid (no tracking) | 50.7 / 0.9 | 55.5 / 0.2 | 44.0 / −0.8 | 52.8 / 5.6 |
+
+The last row (from `tools/measure.mjs`) shows what motion does without the
+face map. This motion is synthetic and 2D only: real head turns also change the
+lighting and hide parts of the face, and have not been tested yet. Tracking
+adds about 25 ms per frame, so a 10-second clip takes roughly twice as long to
+read.
+
+### Offline tool
+
+`tools/stabilize.py` does the same projection in Python and writes the face
+map as a video, e.g. to inspect it or to feed other software.
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
@@ -108,47 +140,29 @@ python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt
 node tools/measure.mjs my-clip.mp4 my-clip-stabilized.mp4  # compare the heart rates
 ```
 
-The stabilized video can also be opened in the app. Details:
-
-- Landmarks are smoothed in time (`--smooth`, Gaussian sigma in frames) so that
-  tracking jitter does not turn into fake colour changes.
+- Landmarks are smoothed in time (`--smooth`, Gaussian sigma in frames).
 - Triangles turned away from the camera (below `--min-visibility` of their best
-  size in the clip) are blacked out rather than smeared.
+  size in the clip) are blacked out.
 - The output is near-lossless H.264 (`--size`, 256 px by default), since the
   pulse lives in very faint colour changes.
 - `--landmarks out.npy` saves the smoothed landmarks.
 
-Test on the demo clip with synthetic head motion added (rotation up to ±17°,
-shift up to ±95 px, zoom ±15 %):
-
-| Clip | GREEN | CHROM | POS | BEAT |
-|---|---|---|---|---|
-| Still, as recorded | 52.8 / 9.4 | 52.9 / 7.3 | 52.7 / 9.3 | 52.6 / 9.6 |
-| Still, stabilized | 52.5 / 6.6 | 52.7 / 5.1 | 52.6 / 8.6 | 52.6 / 9.3 |
-| Moving, as recorded | 50.7 / 0.9 | 55.5 / 0.2 | 44.0 / −0.8 | 52.8 / 5.6 |
-| Moving, stabilized | 51.1 / 1.1 | 52.6 / 6.5 | 52.8 / 8.5 | 52.6 / 8.8 |
-
-(bpm / pulse SNR in dB). Without stabilization, motion breaks the published
-estimators; after it, POS and BEAT are nearly as good as on the still clip. At
-twice that motion the rates are still right after stabilization (52.1–52.6
-bpm) but the SNR drops to 1–4 dB: at large poses the landmarks are a few pixels
-off, so each map pixel slides slightly over the skin. This synthetic motion is
-2D only; real head turns also change lighting and hide parts of the face, and
-have not been tested yet.
+At ×2 motion this tool currently does worse than the app (BEAT 0.8 dB against
+8.5 dB in the app, with correct rates in both); the cause has not been found
+yet.
 
 ## Limitations
 
 - The demo clip has no contact-sensor ground truth; the estimators are checked
   against each other, not against an ECG.
-- In the app, the face must stay roughly still: cells are fixed in the frame.
-  Stabilize moving clips first with `tools/stabilize.py`.
+- Head motion has only been tested synthetically (2D). Large turns that hide
+  half of the face, and the lighting changes they bring, are untested.
 - This is a demonstration, not a medical device.
 
 ## Roadmap
 
-- **Moving faces in the app.** Run the stabilization in the browser
-  (MediaPipe has a web version), and remove motion residue from the signal.
-- Test on real head motion, with lighting changes.
+- Test on real head motion, with lighting changes; remove motion residue from
+  the signal.
 - Live webcam input with a sliding window.
 - Validation on a public dataset with ground truth (e.g. UBFC-rPPG).
 
@@ -157,11 +171,12 @@ have not been tested yet.
 ```
 index.html, style.css   the page
 src/app.js              UI wiring
-src/extract.js          video → low-resolution clip
+src/extract.js          video → low-resolution clip (and face map)
+src/face.js             face tracker (MediaPipe, loaded on demand)
 src/charts.js           SVG charts
-src/core/               dsp, pyramid, rppg, magnify (shared with Node)
-tools/                  validate.mjs, benchmark.mjs, measure.mjs,
-                        stabilize.py (+ face_uv.json mesh layout)
+src/core/               dsp, pyramid, rppg, magnify, unwrap (shared with Node)
+src/core/face-mesh.json face mesh layout (from MediaPipe, Apache-2.0)
+tools/                  validate.mjs, benchmark.mjs, measure.mjs, stabilize.py
 ```
 
 ## Reference
